@@ -1,0 +1,9 @@
+fastapi
+pydantic
+uvicorn[standard]
+ray[serve]
+torch>=2.1.0
+torchaudio
+demucs==4.0.0
+google-cloud-storage
+python-multipart  # needed for UploadFile

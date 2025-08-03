@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Logs and artifacts
+*.log
+mock_storage/
+
+__pycache__/
+*.pyc
+.env
+output.zip
+*.log
+*.egg-info/
+venv/
+.cache/
+service_account.json
+terraform.tfstate*

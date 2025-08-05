@@ -1,0 +1,23 @@
+# Edit these settings to customize your audio separation
+
+# Model Configuration
+model:
+  # Available models: htdemucs, htdemucs_ft, hdemucs_mmi, mdx_extra_q
+  name: "htdemucs"  # Best quality hybrid model (recommended)
+
+# Audio Processing
+audio:
+  # Supported input formats
+  supported_formats: [".wav", ".mp3", ".flac", ".m4a", ".aiff", ".aif", ".ogg"]
+  
+  # Maximum file size in MB
+  max_file_size: 100
+
+# API Settings
+api:
+  title: "StemSplitter API"
+  description: "AI-powered audio stem separation service"
+  version: "1.0.0"
+  
+  # CORS settings
+  cors_origins: ["http://localhost:3000"]

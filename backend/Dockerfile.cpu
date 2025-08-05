@@ -1,14 +1,38 @@
+# CPU Dockerfile - Optimized for CPU processing
 FROM python:3.11-slim
 
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies including build tools
 RUN apt-get update && apt-get install -y \
-    python3-pip ffmpeg git curl \
+    ffmpeg \
+    curl \
+    gcc \
+    g++ \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-cpu.txt requirements.txt
-RUN pip3 install --upgrade pip && pip3 install -r requirements.txt
-
-COPY . /app
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+RUN python3 -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')" || \
+    python3 -c "from demucs import pretrained; pretrained.get_model('htdemucs')" || \
+    echo "Model download attempted"
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,789 @@
+Project Root: .
+
+---- api/separate.py ----
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import Response
+from services.file_storage_service import FileStorageService
+from services.audio_separation_service import audio_separation_service
+import asyncio
+from dotenv import load_dotenv
+
+load_dotenv()
+
+router = APIRouter()
+storage_service = FileStorageService()
+
+
+@router.post("/separate", response_class=Response)
+async def separate(file: UploadFile = File(...)) -> Response:
+    """
+    Separate a single audio file into its source stems using Demucs.
+
+    Accepts various audio formats (WAV, MP3, AIFF, M4A, FLAC, OGG), preprocesses them
+    for optimal Demucs compatibility, runs inference, and returns a ZIP stream
+    containing separated audio stems (e.g., drums, bass, vocals, other).
+
+    Returns:
+        Response: ZIP file containing separated audio stems.
+    Raises:
+        HTTPException: if the file format is invalid or processing fails.
+    """
+    # Validate file format using the service
+    if not file.filename or not audio_separation_service.is_supported_format(file.filename):
+        supported_formats = ", ".join(audio_separation_service.supported_extensions)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Must be one of: {supported_formats}"
+        )
+
+    audio_bytes = await file.read()
+
+    try:
+        # Run audio separation
+        zip_bytes = await audio_separation_service.separate_audio(audio_bytes, file.filename)
+        
+        # Store and stream the result
+        file_path = await asyncio.to_thread(storage_service.store_file, zip_bytes, "zip")
+        return await asyncio.to_thread(storage_service.stream_file, file_path)
+        
+    except ValueError as e:
+        # Audio preprocessing errors (client error)
+        error_msg = str(e)
+        if "ffmpeg not found" in error_msg:
+            raise HTTPException(
+                status_code=500, 
+                detail="Server configuration error: ffmpeg required for this audio format"
+            )
+        raise HTTPException(status_code=400, detail=error_msg)
+    except Exception as e:
+        # Other processing errors (server error)
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+---- config.py ----
+import os
+from typing import List
+
+
+class Settings:
+    """Application configuration settings."""
+    
+    # Environment
+    ENV: str = os.getenv("ENV", "development")
+    DEBUG: bool = ENV == "development"
+    
+    # API Configuration
+    API_TITLE: str = "Audio Stem Separation API"
+    API_DESCRIPTION: str = "Professional audio source separation using Demucs"
+    API_VERSION: str = "1.0.0"
+    
+    # Server Configuration
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    PORT: int = int(os.getenv("PORT", 8000))
+    
+    # CORS Configuration
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "https://*.vercel.app",
+        os.getenv("FRONTEND_URL", "https://your-domain.com")
+    ]
+    
+    # File Storage
+    TEMP_DIR: str = os.getenv("TEMP_DIR", "/tmp")
+    
+    # Model Configuration
+    DEMUCS_MODEL: str = os.getenv("DEMUCS_MODEL", "htdemucs")
+    
+    # GPU Configuration
+    CUDA_VISIBLE_DEVICES: str = os.getenv("CUDA_VISIBLE_DEVICES", "0")
+    
+    # Timeouts (seconds)
+    REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", 300))
+    
+    @property
+    def docs_url(self) -> str:
+        """Return docs URL only in development."""
+        return "/docs" if self.DEBUG else None
+    
+    @property
+    def redoc_url(self) -> str:
+        """Return redoc URL only in development."""
+        return "/redoc" if self.DEBUG else None
+    
+    @property
+    def openapi_url(self) -> str:
+        """Return OpenAPI URL only in development."""
+        return "/openapi.json" if self.DEBUG else None
+
+
+# Global settings instance
+settings = Settings()
+
+---- infra/__init__.py ----
+
+---- infra/demucs_model.py ----
+import os
+import tempfile
+import torch
+import torchaudio
+import zipfile
+from typing import Dict, List
+from torch import Tensor
+from demucs.apply import apply_model
+from torchaudio.transforms import Resample
+from demucs.pretrained import get_model
+
+
+class DemucsModel:
+    """
+    Demucs implementation of the IAudioModel interface.
+    
+    This class loads a pretrained Demucs model and provides audio source separation
+    functionality. It expects preprocessed WAV audio input and outputs a ZIP archive
+    containing the separated stems.
+    """
+
+    def __init__(self, model_name: str = "htdemucs"):
+        """
+        Initialize the Demucs model.
+
+        Args:
+            model_name (str): The name of the Demucs model to load.
+        """
+        self.model_name = model_name
+        self.device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = get_model(model_name).to(self.device).eval()
+
+    def separate(self, audio_bytes: bytes) -> bytes:
+        """
+        Perform source separation on preprocessed WAV audio.
+
+        Args:
+            audio_bytes (bytes): Raw WAV audio file content (should be preprocessed).
+
+        Returns:
+            bytes: A ZIP archive containing the separated source stems as WAV files.
+            
+        Raises:
+            Exception: If audio loading or separation fails.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "input.wav")
+            
+            # Write input audio to temporary file
+            with open(input_path, "wb") as f:
+                f.write(audio_bytes)
+
+            try:
+                # Load audio with torchaudio
+                waveform, original_sr = torchaudio.load(input_path)
+            except Exception as e:
+                raise Exception(f"Failed to load audio: {str(e)}")
+
+            # Convert to target sample rate for Demucs (44.1kHz)
+            if original_sr != 44100:
+                resampler = Resample(orig_freq=original_sr, new_freq=44100)
+                waveform = resampler(waveform)
+
+            # Prepare waveform for model input
+            waveform = waveform.unsqueeze(0).to(self.device)  # Shape: [1, channels, time]
+
+            try:
+                # Run separation
+                with torch.no_grad():
+                    sources: Tensor = apply_model(self.model, waveform, progress=False)
+            except Exception as e:
+                raise Exception(f"Demucs separation failed: {str(e)}")
+
+            # Remove batch dimension
+            sources = sources.squeeze(0)  # Shape: [num_sources, channels, time]
+
+            # Create ZIP archive with separated stems
+            zip_path = os.path.join(tmpdir, "stems.zip")
+            try:
+                with zipfile.ZipFile(zip_path, "w") as zf:
+                    for i, name in enumerate(self.model.sources):
+                        audio = sources[i]
+                        stem_path = os.path.join(tmpdir, f"{name}.wav")
+                        
+                        # Save stem as WAV file
+                        torchaudio.save(stem_path, audio.cpu(), 44100)
+                        
+                        # Add to ZIP archive
+                        zf.write(stem_path, arcname=f"{name}.wav")
+
+                # Read and return ZIP bytes
+                with open(zip_path, "rb") as f:
+                    return f.read()
+                    
+            except Exception as e:
+                raise Exception(f"Failed to create output ZIP: {str(e)}")
+
+    def get_source_names(self) -> List[str]:
+        """
+        Get the names of the audio sources this model separates.
+        
+        Returns:
+            List[str]: List of source names from the loaded Demucs model.
+        """
+        return list(self.model.sources)
+
+    def get_model_info(self) -> Dict[str, str]:
+        """
+        Get information about the Demucs model.
+        
+        Returns:
+            Dict[str, str]: Model information including name, device, and sources.
+        """
+        return {
+            "name": self.model_name,
+            "device": str(self.device),
+            "sources": ", ".join(self.model.sources),
+            "sample_rate": "44100",
+            "type": "Demucs"
+        }
+
+---- infra/ffmpeg_processor.py ----
+import os
+import tempfile
+import torchaudio
+import torch
+import subprocess
+from typing import List
+
+
+class AudioProcessor:
+    """
+    Audio processor that handles format conversion and preprocessing.
+    
+    Uses torchaudio as the primary processor and falls back to FFmpeg 
+    for unsupported formats like M4A.
+    """
+    
+    SUPPORTED_EXTENSIONS = (".wav", ".mp3", ".aif", ".aiff", ".m4a", ".flac", ".ogg")
+    
+    def preprocess_audio(self, audio_bytes: bytes, original_filename: str = "input") -> bytes:
+        """
+        Preprocess audio bytes into a standardized WAV format.
+        
+        Args:
+            audio_bytes (bytes): Raw audio file content in any supported format
+            original_filename (str): Original filename for format detection
+            
+        Returns:
+            bytes: Preprocessed audio as WAV format bytes
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Determine file extension for format detection
+            file_ext = self._get_file_extension(original_filename)
+            input_path = os.path.join(tmpdir, f"input{file_ext}")
+            intermediate_path = os.path.join(tmpdir, "converted.wav")
+            output_path = os.path.join(tmpdir, "preprocessed.wav")
+            
+            # Write input bytes to temporary file
+            with open(input_path, "wb") as f:
+                f.write(audio_bytes)
+            
+            # Try to load with torchaudio first
+            try:
+                waveform, sample_rate = torchaudio.load(input_path)
+                use_ffmpeg_fallback = False
+            except Exception as e:
+                # If torchaudio fails, use FFmpeg to convert to WAV first
+                print(f"torchaudio failed for {file_ext}, using ffmpeg fallback: {e}")
+                use_ffmpeg_fallback = True
+            
+            if use_ffmpeg_fallback:
+                # Use FFmpeg to convert to WAV format that torchaudio can handle
+                self._convert_with_ffmpeg(input_path, intermediate_path)
+                waveform, sample_rate = torchaudio.load(intermediate_path)
+            
+            # Normalize channels (ensure stereo)
+            waveform = self._normalize_channels(waveform)
+            
+            # Ensure float32 format for consistency
+            if waveform.dtype != torch.float32:
+                waveform = waveform.float()
+            
+            # Save as standardized WAV file
+            torchaudio.save(
+                output_path, 
+                waveform, 
+                sample_rate,
+                encoding="PCM_F",  # 32-bit float
+                bits_per_sample=32
+            )
+            
+            # Read and return the preprocessed bytes
+            with open(output_path, "rb") as f:
+                return f.read()
+    
+    def is_supported_format(self, filename: str) -> bool:
+        """Check if the given filename has a supported audio format."""
+        if not filename:
+            return False
+        return filename.lower().endswith(self.SUPPORTED_EXTENSIONS)
+    
+    def _convert_with_ffmpeg(self, input_path: str, output_path: str) -> None:
+        """Convert audio file to WAV using FFmpeg as a fallback."""
+        try:
+            cmd = [
+                "ffmpeg", 
+                "-i", input_path,
+                "-ar", "44100",        # Set sample rate to 44.1kHz
+                "-ac", "2",            # Convert to stereo
+                "-acodec", "pcm_f32le", # 32-bit float PCM
+                "-y",                  # Overwrite output file
+                output_path
+            ]
+            
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+        except subprocess.CalledProcessError as e:
+            raise ValueError(f"ffmpeg conversion failed: {e.stderr}")
+        except FileNotFoundError:
+            raise ValueError("ffmpeg not found. Please install ffmpeg to support M4A and other formats.")
+    
+    def _get_file_extension(self, filename: str) -> str:
+        """Extract file extension, defaulting to .wav if unknown."""
+        if not filename or "." not in filename:
+            return ".wav"
+        return os.path.splitext(filename.lower())[1]
+    
+    def _normalize_channels(self, waveform: torch.Tensor) -> torch.Tensor:
+        """Normalize audio channels to stereo."""
+        num_channels = waveform.shape[0]
+        
+        if num_channels == 1:
+            # Convert mono to stereo by duplicating the channel
+            waveform = waveform.repeat(2, 1)
+        elif num_channels > 2:
+            # Convert multi-channel to stereo by taking first 2 channels
+            waveform = waveform[:2, :]
+        
+        return waveform
+
+---- infra/file_repo.py ----
+import uuid
+from pathlib import Path
+from fastapi.responses import StreamingResponse
+
+
+class FileRepository:
+    """
+    Simple local file repository using the /tmp directory. Suitable for ephemeral environments
+    like Cloud Run, where persistent storage is not required.
+    """
+
+    def __init__(self, base_dir: str = "/tmp"):
+        self.base_dir = Path(base_dir)
+        self.base_dir.mkdir(exist_ok=True)
+
+    def upload_file(self, file_bytes: bytes, file_type: str = "wav", is_temporary: bool = False) -> str:
+        """
+        Save the uploaded file to the local file system.
+
+        Args:
+            file_bytes (bytes): The binary content of the file.
+            file_type (str): File extension, e.g., 'wav', 'zip'.
+            is_temporary (bool): Determines if file goes into temp/ or files/.
+
+        Returns:
+            str: Full file path of the stored file.
+        """
+        if not file_type.startswith("."):
+            file_type = f".{file_type}"
+
+        folder = "temp" if is_temporary else "files"
+        full_dir = self.base_dir / folder
+        full_dir.mkdir(exist_ok=True)
+
+        file_id = f"file_{uuid.uuid4()}{file_type}"
+        file_path = full_dir / file_id
+
+        file_path.write_bytes(file_bytes)
+        return str(file_path)
+
+    def get_streaming_response(self, file_url: str, filename: str = "output.zip") -> StreamingResponse:
+        """
+        Stream a file as a downloadable response.
+
+        Args:
+            file_url (str): Full local file path.
+            filename (str): Filename to present in the download prompt.
+
+        Returns:
+            StreamingResponse: FastAPI response object with file stream.
+        """
+        file_path = Path(file_url)
+        if not file_path.exists():
+            raise FileNotFoundError(f"{file_url} does not exist")
+
+        def file_generator():
+            with open(file_path, "rb") as f:
+                while chunk := f.read(8192):  # Read in 8KB chunks
+                    yield chunk
+
+        return StreamingResponse(
+            file_generator(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+
+def create_file_repository() -> FileRepository:
+    """
+    Instantiate the local file repository for /tmp storage.
+    """
+    return FileRepository(base_dir="/tmp")
+
+---- main.py ----
+from fastapi import FastAPI
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.cors import CORSMiddleware  # Add this import
+from contextlib import asynccontextmanager
+from config import settings
+from api.separate import router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
+    # Startup
+    if settings.DEBUG:
+        print("🎵 Audio Separation API starting in development mode")
+    else:
+        print("🎵 Audio Separation API starting in production mode")
+    
+    yield
+    
+    # Shutdown
+    print("🎵 Audio Separation API shutting down")
+
+
+# Create FastAPI app with production metadata
+app = FastAPI(
+    title=settings.API_TITLE,
+    description=settings.API_DESCRIPTION,
+    version=settings.API_VERSION,
+    docs_url=settings.docs_url,
+    redoc_url=settings.redoc_url,
+    openapi_url=settings.openapi_url,
+    lifespan=lifespan,
+)
+
+# CORS middleware - ADD THIS SECTION
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",  # Your frontend
+        "http://127.0.0.1:3000",
+        "https://localhost:3000",  # In case you use HTTPS
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+# Security middleware for production
+if not settings.DEBUG:
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[
+            "localhost",
+            "127.0.0.1",
+            "*.run.app",  # Cloud Run domains
+            "your-domain.com",  # Your custom domain
+        ]
+    )
+
+# Health check endpoint for Cloud Run
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for load balancers and monitoring."""
+    return {"status": "healthy", "service": "audio-separation-api"}
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "service": "Audio Stem Separation API",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs" if settings.DEBUG else "disabled in production"
+    }
+
+# Include API routes
+app.include_router(router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Local development server
+    uvicorn.run(
+        "main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
+        log_level="info" if not settings.DEBUG else "debug"
+    )
+
+---- requirements.txt ----
+fastapi
+pydantic
+uvicorn[standard]
+torch
+torchaudio
+demucs==4.0.0
+python-multipart
+python-dotenv
+
+---- services/audio_separation_service.py ----
+import asyncio
+from infra.demucs_model import DemucsModel
+from infra.ffmpeg_processor import AudioProcessor
+
+
+class AudioSeparationService:
+    """
+    Service for running audio source separation with preprocessing.
+    
+    Orchestrates the full pipeline: preprocessing -> separation -> output.
+    """
+
+    def __init__(self):
+        self.model = DemucsModel()
+        self.processor = AudioProcessor()
+
+    async def separate_audio(self, audio_bytes: bytes, filename: str = "input") -> bytes:
+        """
+        Run audio separation with preprocessing in background threads.
+
+        Args:
+            audio_bytes (bytes): Raw audio input in any supported format.
+            filename (str): Original filename for format detection.
+
+        Returns:
+            bytes: ZIP archive of separated stems.
+            
+        Raises:
+            ValueError: If audio preprocessing fails.
+            Exception: If audio separation fails.
+        """
+        # Preprocess audio in background thread
+        try:
+            preprocessed_audio = await asyncio.to_thread(
+                self.processor.preprocess_audio, 
+                audio_bytes, 
+                filename
+            )
+        except ValueError as e:
+            raise ValueError(f"Audio preprocessing failed: {str(e)}")
+        
+        # Run separation in background thread
+        try:
+            return await asyncio.to_thread(self.model.separate, preprocessed_audio)
+        except Exception as e:
+            raise Exception(f"Audio separation failed: {str(e)}")
+
+    def is_supported_format(self, filename: str) -> bool:
+        """Check if the audio format is supported."""
+        return self.processor.is_supported_format(filename)
+
+    @property
+    def supported_extensions(self) -> tuple:
+        """Get supported file extensions."""
+        return self.processor.SUPPORTED_EXTENSIONS
+
+
+# Singleton instance
+audio_separation_service = AudioSeparationService()
+
+---- services/file_storage_service.py ----
+from fastapi.responses import StreamingResponse
+from infra.file_repo import create_file_repository  # rename as needed
+
+class FileStorageService:
+    def __init__(self):
+        self.repo = create_file_repository()
+
+    def store_file(self, file_bytes: bytes, file_type: str = "zip") -> str:
+        return self.repo.upload_file(file_bytes, file_type=file_type, is_temporary=True)
+
+    def stream_file(self, file_path: str, filename: str = "output.zip") -> StreamingResponse:
+        return self.repo.get_streaming_response(file_path, filename)
+
+---- tests/__init__.py ----
+
+---- tests/conftest.py ----
+import os
+import sys
+import pytest
+import pytest_asyncio
+from pathlib import Path
+from httpx import AsyncClient, ASGITransport
+from main import app
+# from tests.utils.audio import trim_audio
+
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+
+# @pytest.fixture(scope="function")
+# def test_audio_path(tmp_path) -> Path:
+#     input_path = Path("tests/e2e/assets/DefaultSet.wav")
+#     output_path = tmp_path / "short_test.wav"
+#     return trim_audio(input_path, output_path, duration_ms=2000)
+
+
+# @pytest.fixture(scope="session")
+# def event_loop():
+#     import asyncio
+#     return asyncio.get_event_loop()
+
+
+@pytest_asyncio.fixture(scope="module")
+async def test_client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+---- tests/e2e/assets/convert_file_types.py ----
+#!/usr/bin/env python3
+"""
+Generate audio test files in various formats using ffmpeg
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+def run_ffmpeg(input_file, output_file, codec_args):
+    """Run ffmpeg command with error handling"""
+    cmd = ["ffmpeg", "-i", str(input_file)] + codec_args + [str(output_file), "-y"]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        print(f"✓ Created {output_file.name}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"✗ Failed to create {output_file.name}: {e.stderr}")
+        return False
+    except FileNotFoundError:
+        print("Error: ffmpeg not found. Please install ffmpeg first.")
+        return False
+
+def generate_audio_formats():
+    """Generate various audio formats for testing"""
+    assets_dir = Path("tests/e2e/assets")
+    base_file = assets_dir / "test_audio.wav"
+    
+    # Create assets directory if it doesn't exist
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check if base file exists
+    if not base_file.exists():
+        print(f"Error: Base audio file {base_file} not found")
+        print("Please ensure you have a test_audio.wav file in the assets directory")
+        return False
+    
+    print(f"Generating audio formats from {base_file.name}...")
+    
+    # Define format conversions
+    formats = [
+        ("test_audio.mp3", ["-codec:a", "libmp3lame", "-b:a", "128k"]),
+        ("test_audio.aif", ["-codec:a", "pcm_s16be"]),
+        ("test_audio.aiff", ["-codec:a", "pcm_s16be"]),
+        ("test_audio.m4a", ["-codec:a", "aac", "-b:a", "128k"]),
+        ("test_audio.flac", ["-codec:a", "flac"]),
+        ("test_audio.ogg", ["-codec:a", "libvorbis", "-b:a", "128k"]),
+    ]
+    
+    success_count = 0
+    total_count = len(formats)
+    
+    for filename, codec_args in formats:
+        output_file = assets_dir / filename
+        if run_ffmpeg(base_file, output_file, codec_args):
+            success_count += 1
+    
+    print(f"\nGeneration complete: {success_count}/{total_count} files created successfully")
+    
+    # List generated files
+    print("\nGenerated files:")
+    for file_path in sorted(assets_dir.glob("test_audio.*")):
+        size = file_path.stat().st_size
+        print(f"  {file_path.name:15} ({size:,} bytes)")
+    
+    return success_count == total_count
+
+if __name__ == "__main__":
+    success = generate_audio_formats()
+    sys.exit(0 if success else 1)
+
+---- tests/e2e/test_separate_stream.py ----
+import zipfile
+import pytest
+import asyncio
+import shutil
+from pathlib import Path
+
+# Check if ffmpeg is available (needed for M4A support)
+def check_ffmpeg_available():
+    """Check if ffmpeg is available on the system."""
+    return shutil.which("ffmpeg") is not None
+
+# All supported audio formats with their MIME types
+AUDIO_FORMATS = [
+    ("test_audio.wav", "audio/wav"),
+    ("test_audio.mp3", "audio/mpeg"),
+    ("test_audio.aif", "audio/aiff"),
+    ("test_audio.aiff", "audio/aiff"),
+    ("test_audio.m4a", "audio/mp4"),
+    ("test_audio.flac", "audio/flac"),
+    ("test_audio.ogg", "audio/ogg"),
+]
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.parametrize("filename, mime_type", AUDIO_FORMATS)
+async def test_audio_separation_all_formats(test_client, tmp_path, filename, mime_type):
+    """Test audio separation endpoint with various audio formats"""
+    input_path = Path(f"tests/e2e/assets/{filename}")
+    output_zip_path = tmp_path / f"{filename}_output.zip"
+    
+    # Ensure the test file exists
+    assert input_path.exists(), f"Test audio file {input_path} not found"
+    
+    # Skip M4A test if ffmpeg is not available
+    if filename.endswith(".m4a") and not check_ffmpeg_available():
+        pytest.skip("ffmpeg not available, skipping M4A test")
+    
+    # Send the audio file to the separation endpoint
+    with open(input_path, "rb") as f:
+        files = {"file": (filename, f, mime_type)}
+        response = await test_client.post("/separate", files=files)
+    
+    # Verify response
+    assert response.status_code == 200, f"Failed for {filename}: {response.text}"
+    assert response.headers["content-type"] == "application/zip"
+    assert response.content and len(response.content) > 0, f"Empty response for {filename}"
+    
+    # Save and verify ZIP contents
+    with open(output_zip_path, "wb") as out:
+        out.write(response.content)
+    
+    with zipfile.ZipFile(output_zip_path, "r") as z:
+        namelist = z.namelist()
+        assert len(namelist) == 4, f"Expected 4 files, got {len(namelist)} for {filename}"
+        assert all(name.endswith(".wav") for name in namelist), f"Not all outputs are WAV files for {filename}"
+        
+        # Verify each output file has content
+        for name in namelist:
+            with z.open(name) as audio_file:
+                content = audio_file.read()
+                assert len(content) > 0, f"Empty audio file {name} in output for {filename}"
+

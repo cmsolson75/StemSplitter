@@ -23,3 +23,6 @@ venv/
 .cache/
 service_account.json
 terraform.tfstate*
+.pytest_cache
+
+deploy.sh

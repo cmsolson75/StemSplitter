@@ -7,8 +7,13 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip3 install --upgrade pip && pip3 install -r requirements.txt
 
+# Pre-download Demucs models to avoid runtime downloads
+RUN python3 -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')" || \
+    python3 -c "from demucs import pretrained; pretrained.get_model('htdemucs')" || \
+    echo "Model download attempted"
+
 COPY . /app
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

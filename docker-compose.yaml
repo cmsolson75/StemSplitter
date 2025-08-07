@@ -35,6 +35,16 @@ services:
       - model_cache:/root/.cache
     restart: unless-stopped
     profiles: ["cpu"]
+    develop:
+      watch:
+        - path: ./backend
+          action: sync
+          target: /app
+        - path: ./backend
+          action: rebuild
+          target: /app
+          ignore:
+            - "**/*.py"   # only rebuild when non-code files change (e.g., Dockerfile, requirements)
 
   frontend:
     build:

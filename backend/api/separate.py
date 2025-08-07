@@ -38,27 +38,19 @@ async def separate(file: UploadFile = File(...)) -> Response:
 
     try:
         # Run audio separation
-        print("🔵 [STEP 1] Reading file bytes...")
-        audio_bytes = await file.read()
-        print(f"✅ [STEP 1] Read {len(audio_bytes)} bytes")
-        
-        print("🔵 [STEP 2] Starting audio separation service...")
+        print("Separating input")
         zip_bytes = await audio_separation_service.separate_audio(audio_bytes, file.filename)
-        print(f"✅ [STEP 2] Separation complete, ZIP size: {len(zip_bytes)} bytes")
+        print(f"Zip output {len(zip_bytes)}")
         
-        print("🔵 [STEP 3] Storing file...")
+        # Store and stream the result
+        print("Storing results")
         file_path = await asyncio.to_thread(storage_service.store_file, zip_bytes, "zip")
-        print(f"✅ [STEP 3] File stored at: {file_path}")
-        
-        print("🔵 [STEP 4] Creating streaming response...")
-        response = await asyncio.to_thread(storage_service.stream_file, file_path)
-        print("✅ [STEP 4] Streaming response created")
-        
-        print("🎉 [SUCCESS] Request completed successfully!")
-        return response
+        print("streaming to user")
+        return await asyncio.to_thread(storage_service.stream_file, file_path)
         
     except ValueError as e:
         # Audio preprocessing errors (client error)
+        print(f"Value Error: {e}")
         error_msg = str(e)
         if "ffmpeg not found" in error_msg:
             raise HTTPException(
@@ -68,4 +60,5 @@ async def separate(file: UploadFile = File(...)) -> Response:
         raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         # Other processing errors (server error)
+        print(f"Error processing: {e}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")

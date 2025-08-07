@@ -1,242 +1,212 @@
+
 # StemSplitter
 
-> **AI-powered audio stem separation that just works**
+> AI-powered audio stem separation using [Demucs v4](https://github.com/facebookresearch/demucs)  
+> Split any track into `vocals`, `drums`, `bass`, and `other` with GPU or CPU processing.
 
-Separate any audio track into individual stems (drums, bass, vocals, other) using state-of-the-art AI. Built with Facebook's Demucs model and wrapped in a beautiful, modern web interface.
-
-## Features
-
-- **One-click separation** - Upload audio, get stems
-- **AI-powered** - Uses Facebook's Demucs v4 model
-- **Beautiful UI** - Modern React interface with real-time progress
-- **Fast processing** - GPU accelerated (with CPU fallback)
-- **Multiple formats** - WAV, MP3, FLAC, M4A, AIFF, OGG
-- **Docker ready** - Single command deployment
-- **Configurable** - Easy YAML configuration
-- **Responsive** - Works on desktop and mobile
+---
 
 ## Quick Start
-
-**Choose your hardware:**
 
 ```bash
 git clone https://github.com/cmsolson75/StemSplitter.git
 cd StemSplitter
 
-# For NVIDIA GPU users
-make up-gpu
+# Build Docker images
+make build
 
-# For everyone else (CPU)
-make up-cpu
+# Start the app (choose one)
+make up-gpu   # NVIDIA GPU required
+make up-cpu   # CPU only
+````
+
+**Example (CPU mode):**
+
+```
+$ make up-cpu
+Starting (CPU)...
+[+] Running 4/4
+ ✔ Network stemsplittertool_default          Created  0.0s
+ ✔ Volume "stemsplittertool_model_cache"     Created  0.0s
+ ✔ Container stemsplittertool-backend-cpu-1  Started  0.2s
+ ✔ Container stemsplittertool-frontend-1     Started  0.2s
+NAME                             IMAGE                          COMMAND                  SERVICE       CREATED                  STATUS                                     PORTS
+stemsplittertool-backend-cpu-1   stemsplittertool-backend-cpu   "uvicorn main:app --…"   backend-cpu   Less than a second ago   Up Less than a second (health: starting)   0.0.0.0:8000->8000/tcp
+stemsplittertool-frontend-1      stemsplittertool-frontend      "docker-entrypoint.s…"   frontend      Less than a second ago   Up Less than a second                      0.0.0.0:3000->3000/tcp
+Frontend: http://localhost:3000
+Backend:  http://localhost:8000
 ```
 
-Then open http://localhost:3000 and start separating audio.
+Open [http://localhost:3000](http://localhost:3000), upload an audio file, and download the ZIP with separated stems.
 
-### Development Setup
+**Example output:**
 
-```bash
-make install  # Install dependencies
-make dev      # Start both services locally
 ```
+song.mp3 → song_separated.zip
+├── drums.wav
+├── bass.wav
+├── vocals.wav
+└── other.wav
+```
+
+---
+
+## Makefile Commands
+
+| Command       | Description                                                   |
+| ------------- | ------------------------------------------------------------- |
+| `make build`  | Build all Docker images                                       |
+| `make up-gpu` | Start frontend + GPU backend (requires NVIDIA GPU)            |
+| `make up-cpu` | Start frontend + CPU backend                                  |
+| `make status` | Show running services and access URLs                         |
+| `make logs`   | View container logs in real time                              |
+| `make down`   | Stop all services                                             |
+| `make clean`  | Remove containers, networks, volumes, and prune unused images |
+
+> **Tip:** Uses `docker compose` by default. For the legacy plugin:
+> `make COMPOSE="docker-compose" up-gpu`
+
+---
 
 ## Requirements
 
-**Hardware Support:**
-- **NVIDIA GPU** (GTX 1060+ recommended) - Fast GPU acceleration
-- **Apple Silicon** (M1/M2/M4 Macs) - Optimized CPU processing
-- **Intel/AMD CPU** (4+ cores recommended) - Works on any modern CPU
+**Hardware**
 
-**System Requirements:**
-- 4GB RAM (8GB+ recommended for large files)
-- 2GB free disk space
-- Docker & Docker Compose
-- Modern web browser
+* **NVIDIA GPU** (GTX 1060+ recommended) for fastest processing
+* **Apple Silicon** (M1/M2/M4) or **Intel/AMD CPU** (≥4 cores) supported
 
-## Usage
+**Software**
 
-1. **Upload** your audio file (drag & drop or browse)
-2. **Wait** for AI processing (30 seconds - 5 minutes depending on length)
-3. **Download** the ZIP containing separated stems:
-   - `drums.wav` - Drum track
-   - `bass.wav` - Bass line
-   - `vocals.wav` - Vocal track  
-   - `other.wav` - Everything else (guitars, keys, etc.)
+* Docker ≥ 20.10
+* Docker Compose plugin ≥ 2.0
+* GNU Make
+* Modern browser (Chrome, Firefox, Safari)
 
-## Supported Formats
+**Recommended**
 
-**Input:** WAV, MP3, FLAC, M4A, AIFF, OGG  
-**Output:** High-quality WAV stems in ZIP archive
+* 8GB+ RAM
+* 2GB+ free disk space
+
+---
+
+## Usage Flow
+
+1. **Build images**
+
+   ```bash
+   make build
+   ```
+2. **Start services**
+
+   ```bash
+   make up-gpu  # GPU mode
+   make up-cpu  # CPU mode
+   ```
+3. **Check status**
+
+   ```bash
+   make status
+   ```
+4. **Upload audio** via [http://localhost:3000](http://localhost:3000)
+5. **Download results** – ZIP with `drums.wav`, `bass.wav`, `vocals.wav`, `other.wav`
+6. **Stop services**
+
+   ```bash
+   make down
+   ```
+7. **Full cleanup**
+
+   ```bash
+   make clean
+   ```
+
+---
 
 ## Configuration
 
-Edit `config.yml` to customize your setup:
+Edit `config.yml`:
 
 ```yaml
-# Model settings
 model:
-  name: "htdemucs"  # Available: htdemucs, htdemucs_ft, hdemucs_mmi
+  name: "htdemucs"  # Options: htdemucs, htdemucs_ft, hdemucs_mmi
 
-# Audio settings  
 audio:
   supported_formats: [".wav", ".mp3", ".flac", ".m4a", ".aiff", ".ogg"]
   max_file_size: 100  # MB
 
-# API settings
 api:
   title: "StemSplitter API"
   cors_origins: ["http://localhost:3000"]
 ```
 
-**Quick config commands:**
-```bash
-make config      # View current config
-make edit-config # Edit config file
-```
+---
 
-## Architecture
+## API Access
 
-```
-┌─────────────────┐     ┌──────────────────┐
-│                 │────▶│                  │
-│  React Frontend │     │  FastAPI Backend │
-│  (Port 3000)    │◀────│  (Port 8000)     │
-│                 │     │                  │
-└─────────────────┘     └──────────────────┘
-                                │
-                                ▼
-                        ┌──────────────────┐
-                        │                  │
-                        │  Demucs AI Model │
-                        │  (GPU/CPU)       │
-                        │                  │
-                        └──────────────────┘
-```
+* **Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+* **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
 
-- **Frontend**: Next.js 14 + TypeScript + Tailwind CSS + shadcn/ui
-- **Backend**: FastAPI + Python with async processing
-- **AI Model**: Facebook Demucs v4 (hybrid transformer)
-- **Deployment**: Docker Compose with GPU support
-
-## Deployment
-
-### Local Development
-```bash
-make dev        # Start both frontend and backend locally
-make test       # Run tests
-make clean      # Clean up Docker resources
-```
-
-### Production with Docker
-```bash
-make build      # Build images
-make up-gpu     # Start with GPU
-make up-cpu     # Start CPU-only
-make logs       # View logs
-make down       # Stop services
-```
-
-### Check System Status
-```bash
-make status     # Show running services and system info
-```
-
-## API Documentation
-
-Once running, visit:
-- **Frontend**: http://localhost:3000
-- **API Docs**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
-
-### API Endpoints
+Example:
 
 ```bash
-POST /separate
-Content-Type: multipart/form-data
-
-# Upload audio file and get separated stems as ZIP
 curl -X POST "http://localhost:8000/separate" \
      -H "accept: application/zip" \
-     -H "Content-Type: multipart/form-data" \
-     -F "file=@your-audio.mp3"
+     -F "file=@track.mp3" \
+     -o stems.zip
 ```
-
-## Testing
-
-```bash
-# Run backend tests
-make test
-
-# Test with sample audio
-cd backend/tests/e2e/assets
-# Upload any of the test_audio.* files via the web interface
-```
-
-## Contributing
-
-We welcome contributions! Here's how to get started:
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### Development Guidelines
-
-- Follow TypeScript/Python best practices
-- Add tests for new features
-- Update documentation
-- Use conventional commit messages
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- **Facebook Research** - For the incredible [Demucs](https://github.com/facebookresearch/demucs) model
-- **Hugging Face** - For model hosting and transformers library
-- **FastAPI** - For the amazing Python web framework
-- **Vercel** - For Next.js and deployment inspiration
-
-## Support
-
-- **Bug reports**: [Open an issue](https://github.com/cmsolson75/StemSplitter/issues)
-- **Feature requests**: [Start a discussion](https://github.com/cmsolson75/StemSplitter/discussions)
-- **Email**: your-email@example.com
-
-## Example Results
-
-Upload a song and get professional-quality stems:
-
-```
-your-song.mp3 (3:45, 8.2MB)
-    ↓ Processing with AI...
-your-song_separated.zip
-├── drums.wav    (Isolated drum track)
-├── bass.wav     (Bass line only)  
-├── vocals.wav   (Clean vocals)
-└── other.wav    (Guitars, keys, etc.)
-```
-
-## Troubleshooting
-
-**Common Issues:**
-
-- **"Failed to fetch"** → Make sure backend is running on port 8000
-- **Slow processing** → Use GPU mode with `make up-gpu` if you have NVIDIA GPU
-- **Out of memory** → Reduce file size or increase Docker memory limit
-- **Unsupported format** → Convert to WAV/MP3 first
-
-**Performance Tips:**
-
-- Use WAV format for best quality
-- Keep files under 10 minutes for faster processing
-- Use GPU mode when available
-- Close other applications during processing
 
 ---
 
-**Made with love for musicians, producers, and audio enthusiasts**
+## Troubleshooting
 
-*Star this repo if it helped you create something awesome!*
+| Problem             | Solution                                                                    |
+| ------------------- | --------------------------------------------------------------------------- |
+| `"Failed to fetch"` | Ensure backend is running on [http://localhost:8000](http://localhost:8000) |
+| Processing slow     | Use GPU mode if available                                                   |
+| Out of memory (OOM) | Shorter audio, lower sample rate, or increase Docker memory                 |
+| Unsupported format  | Convert to WAV or MP3                                                       |
+| GPU not detected    | Verify NVIDIA drivers and Docker GPU runtime                                |
+
+**Performance tips**
+
+* Use WAV for predictable quality
+* Keep files under 10 minutes
+* Close other heavy applications
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch:
+   `git checkout -b feat/your-feature`
+3. Commit changes:
+   `git commit -m "feat: your-feature"`
+4. Push to your fork:
+   `git push origin feat/your-feature`
+5. Open a Pull Request
+
+---
+
+## Additional Documentation
+
+For service-specific details:
+
+* [Backend README](backend/README.md)
+* [Frontend README](frontend/README.md)
+
+*Additional READMEs generated with [Skim](https://github.com/cmsolson75/skim) and GPT-5, with minor editing by author.*
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)
+
+---
+
+## Acknowledgments
+
+* [Demucs (Facebook Research)](https://github.com/facebookresearch/demucs)
+* [FastAPI](https://fastapi.tiangolo.com)
+* [Next.js](https://nextjs.org)

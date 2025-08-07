@@ -26,17 +26,9 @@ class DemucsModel:
             model_name (str): The name of the Demucs model to load. If None, uses config.
         """
         # Only change: get model name from config if not provided
-        print(f"🔵 Initializing Demucs model: {model_name}")
         self.model_name = model_name or config.get("model.name", "htdemucs")
-        print(f"🔵 Using model: {self.model_name}")
-        
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"🔵 Using device: {self.device}")
-        
-        print("🔵 Loading model...")
+        self.device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = get_model(self.model_name).to(self.device).eval()
-        print("✅ Model loaded successfully!")
-
 
     def separate(self, audio_bytes: bytes) -> bytes:
         """

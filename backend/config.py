@@ -11,7 +11,7 @@ class Settings:
     DEBUG: bool = ENV == "development"
     
     # API Configuration - Use YAML config with env var fallbacks
-    API_TITLE: str = config.get("api.title", "I AM SPLITTER API")
+    API_TITLE: str = config.get("api.title", "SONG SPLITTER API")
     API_DESCRIPTION: str = config.get("api.description", "AI-powered audio stem separation service")
     API_VERSION: str = config.get("api.version", "1.0.0")
     

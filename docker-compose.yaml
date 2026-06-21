@@ -9,8 +9,6 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DEBUG=true
-    volumes:
-      - model_cache:/root/.cache
     deploy:
       resources:
         reservations:
@@ -31,8 +29,6 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DEBUG=true
-    volumes:
-      - model_cache:/root/.cache
     restart: unless-stopped
     profiles: ["cpu"]
     develop:
@@ -44,7 +40,7 @@ services:
           action: rebuild
           target: /app
           ignore:
-            - "**/*.py"   # only rebuild when non-code files change (e.g., Dockerfile, requirements)
+            - "**/*.py"   # only rebuild when non-code files change (e.g., Dockerfile, UV lock)
 
   frontend:
     build:
@@ -55,6 +51,3 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     restart: unless-stopped
-
-volumes:
-  model_cache:

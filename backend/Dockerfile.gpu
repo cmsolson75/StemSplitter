@@ -1,19 +1,42 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+ARG CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM ${CUDA_IMAGE}
 
-RUN apt-get update && apt-get install -y \
-    python3-pip ffmpeg git curl \
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH" \
+    TORCH_HOME=/models/torch \
+    XDG_CACHE_HOME=/models/xdg
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
+    git \
+    curl \
+    ca-certificates \
+    gcc \
+    g++ \
+    libgomp1 \
+    libsndfile1 \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip3 install --upgrade pip && pip3 install -r requirements.txt
+RUN python3 -m pip install --no-cache-dir uv==0.9.26
 
-# Pre-download Demucs models to avoid runtime downloads
-RUN python3 -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')" || \
-    python3 -c "from demucs import pretrained; pretrained.get_model('htdemucs')" || \
-    echo "Model download attempted"
-
-COPY . /app
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1
+COPY pyproject.toml uv.lock ./
+RUN uv sync --python /usr/bin/python3 --frozen --no-dev
+
+# Pre-download Demucs models to avoid runtime downloads
+RUN mkdir -p /models && \
+    python -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')" || \
+    python -c "from demucs import pretrained; pretrained.get_model('htdemucs')" || \
+    echo "Model download attempted"
+
+COPY . .
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

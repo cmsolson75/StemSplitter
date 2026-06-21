@@ -36,12 +36,12 @@ build: ## Build all images
 
 up-gpu: ## Start GPU backend + frontend
 	printf "$(GREEN)Starting (GPU)...$(NC)\n"
-	$(COMPOSE) -p $(PROJECT) up -d $(BACKEND_GPU) $(FRONTEND)
+	$(COMPOSE) -p $(PROJECT) up -d --build $(BACKEND_GPU) $(FRONTEND)
 	$(MAKE) --no-print-directory status
 
 up-cpu: ## Start CPU backend + frontend
 	printf "$(GREEN)Starting (CPU)...$(NC)\n"
-	$(COMPOSE) -p $(PROJECT) up -d $(BACKEND_CPU) $(FRONTEND)
+	$(COMPOSE) -p $(PROJECT) up -d --build $(BACKEND_CPU) $(FRONTEND)
 	$(MAKE) --no-print-directory status
 
 status: ## Show running services and URLs

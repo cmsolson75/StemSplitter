@@ -1,9 +1,0 @@
-fastapi
-pydantic
-uvicorn[standard]
-torch
-torchaudio
-demucs==4.0.0
-python-multipart
-python-dotenv
-pyyaml

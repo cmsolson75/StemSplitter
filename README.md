@@ -12,7 +12,7 @@
 git clone https://github.com/cmsolson75/StemSplitter.git
 cd StemSplitter
 
-# Build Docker images
+# Build Docker images from the UV-locked backend and frontend package locks
 make build
 
 # Start the app (choose one)
@@ -124,7 +124,7 @@ song.mp3 → song_separated.zip
 
 ## Configuration
 
-Edit `config.yml`:
+Edit `backend/config.yaml`:
 
 ```yaml
 model:

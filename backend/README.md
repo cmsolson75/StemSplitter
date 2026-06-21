@@ -30,13 +30,13 @@ This service processes uploaded audio files and returns separated stems (`vocals
 ### 1. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 2. Run backend (CPU mode)
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 3. Run backend (GPU mode)
@@ -57,7 +57,7 @@ make up-gpu
 
 ## Configuration
 
-Edit `config.yml` in the backend directory:
+Edit `config.yaml` in the backend directory:
 
 ```yaml
 model:
@@ -113,8 +113,9 @@ cd tests/e2e/assets
 ```
 backend/
 ├── main.py           # FastAPI entrypoint
-├── config.yml        # Backend configuration
-├── requirements.txt  # Python dependencies
+├── config.yaml       # Backend configuration
+├── pyproject.toml    # Python project metadata
+├── uv.lock           # Locked Python dependencies
 ├── app/
 │   ├── api/          # API routes
 │   ├── core/         # Core config and utilities

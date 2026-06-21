@@ -1,33 +1,46 @@
 # CPU Dockerfile - Optimized for CPU processing
-FROM python:3.11-slim
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
-ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH" \
+    TORCH_HOME=/models/torch \
+    XDG_CACHE_HOME=/models/xdg
 
 # Install system dependencies including build tools
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    ca-certificates \
     gcc \
     g++ \
+    libgomp1 \
+    libsndfile1 \
     make \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python -m pip install --no-cache-dir --root-user-action=ignore uv==0.9.26
+
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install Python dependencies from the locked UV environment
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
 
 # Copy application code
 COPY . .
 
 # Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /models \
+    && chown -R appuser:appuser /app /models
 USER appuser
 
-RUN python3 -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')" || \
-    python3 -c "from demucs import pretrained; pretrained.get_model('htdemucs')" || \
+RUN python -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')" || \
+    python -c "from demucs import pretrained; pretrained.get_model('htdemucs')" || \
     echo "Model download attempted"
 
 EXPOSE 8000

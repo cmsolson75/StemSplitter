@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 
-type AppState = 'upload' | 'processing' | 'complete' | 'error'
+type AppState = 'upload' | 'ready' | 'processing' | 'complete' | 'error'
 
 const SUPPORTED_FORMATS = ['.wav', '.mp3', '.aiff', '.m4a', '.flac', '.ogg']
 const STEMS = ['Drums', 'Bass', 'Vocals', 'Other']
@@ -52,7 +52,7 @@ export default function AudioSplitter() {
 
     setFile(selectedFile)
     setError('')
-    setState('upload')
+    setState('ready')
   }, [])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -179,17 +179,19 @@ export default function AudioSplitter() {
           </div>
         </header>
 
-        <section className="grid flex-1 gap-5 py-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <Card className="rounded-lg border-zinc-200 bg-white shadow-sm">
+        <section className="grid items-start gap-5 py-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <Card className="h-fit rounded-lg border-zinc-200 bg-white shadow-sm">
             <CardHeader className="border-b border-zinc-100 text-left">
               <CardTitle className="text-xl text-zinc-950">
                 {state === 'upload' && 'Upload audio'}
+                {state === 'ready' && 'Ready to process'}
                 {state === 'processing' && 'Processing audio'}
                 {state === 'complete' && 'Ready to download'}
                 {state === 'error' && 'Processing failed'}
               </CardTitle>
               <CardDescription className="text-zinc-500">
                 {state === 'upload' && 'Choose an audio file to split into individual tracks.'}
+                {state === 'ready' && 'Start separation or choose a different track.'}
                 {state === 'processing' && 'The backend is separating your file. Large tracks can take a few minutes.'}
                 {state === 'complete' && 'Your separated stems are packaged in a zip file.'}
                 {state === 'error' && 'Check the message below and try again.'}
@@ -243,29 +245,40 @@ export default function AudioSplitter() {
                     ))}
                   </div>
 
-                  {file && (
-                    <div className="rounded-lg border border-zinc-200 bg-white">
-                      <div className="flex items-center gap-3 p-4">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-md bg-teal-50 text-teal-700">
-                          <FileAudio className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-zinc-950">{file.name}</p>
-                          <p className="text-sm text-zinc-500">{fileSize}</p>
-                        </div>
+                </>
+              )}
+
+              {state === 'ready' && file && (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-zinc-200 bg-white">
+                    <div className="flex items-center gap-3 p-4">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-md bg-teal-50 text-teal-700">
+                        <FileAudio className="h-5 w-5" />
                       </div>
-                      <div className="border-t border-zinc-100 p-4">
-                        <Button
-                          onClick={processAudio}
-                          className="w-full bg-teal-700 text-white hover:bg-teal-800"
-                        >
-                          <Music className="h-4 w-4" />
-                          Start separation
-                        </Button>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-zinc-950">{file.name}</p>
+                        <p className="text-sm text-zinc-500">{fileSize}</p>
                       </div>
                     </div>
-                  )}
-                </>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <Button
+                      onClick={processAudio}
+                      className="bg-teal-700 text-white hover:bg-teal-800"
+                    >
+                      <Music className="h-4 w-4" />
+                      Start separation
+                    </Button>
+                    <Button
+                      onClick={reset}
+                      variant="outline"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Choose different file
+                    </Button>
+                  </div>
+                </div>
               )}
 
               {state === 'processing' && (

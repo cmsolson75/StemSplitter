@@ -11,7 +11,6 @@ import {
   Music,
   RotateCcw,
   Upload,
-  Waves,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -155,12 +154,8 @@ export default function AudioSplitter() {
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-5 sm:px-6 lg:px-8">
         <header className="grid gap-5 border-b border-zinc-200 pb-5 sm:grid-cols-[1fr_auto] sm:items-end">
           <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 shadow-sm">
-              <Waves className="h-3.5 w-3.5 text-teal-600" />
-              Source separation
-            </div>
             <h1 className="text-3xl font-semibold text-zinc-950 sm:text-4xl">
-              Song Splitter
+              Stem Splitter
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-600 sm:text-base">
               Upload one track and get clean drums, bass, vocals, and other stems back as a zip.

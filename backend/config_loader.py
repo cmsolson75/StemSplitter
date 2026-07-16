@@ -13,16 +13,16 @@ class Config:
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file"""
         if not self.config_path.exists():
-            print(f"⚠️  Config file {self.config_path} not found, using defaults")
+            print(f"Config file {self.config_path} not found, using defaults")
             return self._get_defaults()
         
         try:
             with open(self.config_path, 'r') as f:
                 config = yaml.safe_load(f)
-                print(f"✅ Loaded config from {self.config_path}")
+                print(f"Loaded config from {self.config_path}")
                 return config
         except Exception as e:
-            print(f"❌ Error loading config: {e}")
+            print(f"Error loading config: {e}")
             return self._get_defaults()
     
     def _get_defaults(self) -> Dict[str, Any]:

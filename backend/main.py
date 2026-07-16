@@ -11,14 +11,14 @@ async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
     # Startup
     if settings.DEBUG:
-        print("🎵 Audio Separation API starting in development mode")
+        print("Audio Separation API starting in development mode")
     else:
-        print("🎵 Audio Separation API starting in production mode")
+        print("Audio Separation API starting in production mode")
     
     yield
     
     # Shutdown
-    print("🎵 Audio Separation API shutting down")
+    print("Audio Separation API shutting down")
 
 
 # Create FastAPI app with production metadata
